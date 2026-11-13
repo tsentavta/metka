@@ -2,9 +2,11 @@
 
 Веб-терминал для маяка на STM32 с LoRa-радиомодулем. Маяк подключается по USB как виртуальный COM-порт («STM32 Virtual COM Port», VID `0483`, PID `5740`). Терминал — один файл [`web/terminal.html`](web/terminal.html): без сервера, без сборки и без установки.
 
+**Онлайн:** https://tsentavta.github.io/metka/ (GitHub Pages)
+
 ## Запуск
 
-1. Откройте `web/terminal.html` в **Google Chrome** или **Microsoft Edge**. Браузер должен поддерживать Web Serial.
+1. Откройте ссылку выше или локальный файл `web/terminal.html` в **Google Chrome** или **Microsoft Edge**. Браузер должен поддерживать Web Serial.
 2. Нажмите «Подключить» и выберите «STM32 Virtual COM Port».
 3. Порт не должен быть занят другой программой.
 
