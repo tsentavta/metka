@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Терминал маяка</title>
+<style>
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --line: #dfe2e7; --text: #1d2430; --muted: #687385;
+  --accent: #1f6feb; --accent-text: #ffffff; --ok: #1a7f37; --err: #cf222e; --warn: #9a6700;
+  --term-bg: #0f1419; --term-text: #d6dde6; --term-tx: #7cc4ff; --term-tele: #7d8896; --term-sys: #e3b341;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117; --panel: #161b22; --line: #30363d; --text: #e6edf3; --muted: #8d96a0;
+    --accent: #2f81f7; --ok: #3fb950; --err: #f85149; --warn: #d29922; --term-bg: #010409;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1117; --panel: #161b22; --line: #30363d; --text: #e6edf3; --muted: #8d96a0;
+  --accent: #2f81f7; --ok: #3fb950; --err: #f85149; --warn: #d29922; --term-bg: #010409;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 16px; margin: 0 8px 0 0; }
+.pill { padding: 3px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
+.pill.on { color: var(--ok); border-color: var(--ok); }
+.pill.off { color: var(--err); border-color: var(--err); }
+.spacer { flex: 1; }
+button, select, input[type=text] { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+button { cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+button.danger { color: var(--err); border-color: var(--err); }
+button.good { color: var(--ok); border-color: var(--ok); }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 12px; padding: 12px 16px; height: calc(100vh - 58px); }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; height: auto; } #log { height: 50vh; } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.termcol { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+#log { flex: 1; min-height: 200px; overflow: auto; background: var(--term-bg); color: var(--term-text); font: 13px/1.45 var(--mono); padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; }
+#log .ts { color: #56606c; }
+#log .tx { color: var(--term-tx); }
+#log .tele { color: var(--term-tele); }
+#log .sys { color: var(--term-sys); }
+#log .err { color: #ff7b72; }
+#log .ok { color: #56d364; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#cmd { flex: 1; min-width: 160px; font-family: var(--mono); }
+.side { display: flex; flex-direction: column; gap: 12px; overflow: auto; min-height: 0; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td { padding: 3px 0; border-bottom: 1px solid var(--line); }
+td:first-child { color: var(--muted); padding-right: 8px; }
+td:last-child { font-family: var(--mono); text-align: right; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.metric span { display: block; font-size: 12px; color: var(--muted); }
+.metric b { font: 600 15px var(--mono); }
+canvas#track { width: 100%; height: 220px; display: block; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+svg#alt { width: 100%; height: 70px; display: block; }
+.muted { color: var(--muted); font-size: 12px; }
+.stale { color: var(--warn); }
+#nosupport { display: none; background: var(--err); color: #fff; padding: 8px 16px; }
+label { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="nosupport">Этот браузер не поддерживает Web Serial. Откройте страницу в Google Chrome или Microsoft Edge.</div>
+<header>
+  <h1>Терминал маяка</h1>
+  <span id="connState" class="pill">не подключено</span>
+  <span id="txState" class="pill">передатчик: ?</span>
+  <span class="spacer"></span>
+  <label>Скорость
+    <select id="baud"><option>9600</option><option>57600</option><option selected>115200</option><option>230400</option><option>460800</option></select>
+  </label>
+  <button id="btnConnect" class="primary">Подключить</button>
+  <button id="btnDisconnect" disabled>Отключить</button>
+  <button id="btnTheme" title="Сменить тему">◐</button>
+</header>
+
+<main>
+  <section class="termcol">
+    <div class="row">
+      <button id="bGet" disabled>GET — настройки</button>
+      <button id="bOn" class="good" disabled>STATON — включить</button>
+      <button id="bOff" class="danger" disabled>STATOFF — выключить</button>
+      <span class="spacer"></span>
+      <label><input type="checkbox" id="showTele" checked> телеметрия</label>
+      <label><input type="checkbox" id="autoscroll" checked> автопрокрутка</label>
+      <button id="bClear">Очистить</button>
+      <button id="bSaveLog">Сохранить лог</button>
+    </div>
+    <div id="log" aria-live="polite"></div>
+    <form id="sendForm" class="row">
+      <input type="text" id="cmd" placeholder="Команда (↑/↓ — история)" autocomplete="off" disabled>
+      <select id="eol" title="Окончание строки">
+        <option value="\r">CR</option><option value="\r\n" selected>CR+LF</option><option value="\n">LF</option><option value="">нет</option>
+      </select>
+      <button type="submit" id="bSend" class="primary" disabled>Отправить</button>
+    </form>
+  </section>
+
+  <aside class="side">
+    <div class="card">
+      <h2>Настройки устройства <span class="spacer"></span><span id="cfgTime" class="muted"></span></h2>
+      <table id="cfg"><tr><td colspan="2" class="muted">Нажмите «GET», чтобы прочитать настройки.</td></tr></table>
+    </div>
+
+    <div class="card">
+      <h2>Телеметрия <span class="spacer"></span><span id="teleAge" class="muted"></span></h2>
+      <div class="grid2">
+        <div class="metric"><span>Широта</span><b id="mLat">—</b></div>
+        <div class="metric"><span>Долгота</span><b id="mLon">—</b></div>
+        <div class="metric"><span>Высота, м</span><b id="mAlt">—</b></div>
+        <div class="metric"><span>Время (UTC?)</span><b id="mTime">—</b></div>
+        <div class="metric"><span>Скорость, м/с</span><b id="mSpd">—</b></div>
+        <div class="metric"><span>Курс, °</span><b id="mCrs">—</b></div>
+        <div class="metric"><span>Верт. скорость, м/с</span><b id="mVz">—</b></div>
+        <div class="metric"><span>Точек</span><b id="mCnt">0</b></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Трек <span class="spacer"></span>
+        <button id="bCsv" style="padding:2px 8px">CSV</button>
+        <button id="bResetTrack" style="padding:2px 8px">Сброс</button>
+      </h2>
+      <canvas id="track"></canvas>
+      <div class="muted" style="margin-top:6px">Высота</div>
+      <svg id="alt" preserveAspectRatio="none"></svg>
+    </div>
+  </aside>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const S = { port: null, reader: null, writer: null, reading: false, rx: '', cfg: {}, cfgOpen: false, track: [], log: [], history: [], hIdx: -1 };
+  const MAX_LOG = 3000;
+
+  try { S.history = JSON.parse(localStorage.getItem('beacon.history') || '[]'); } catch (e) {}
+  try { const t = localStorage.getItem('beacon.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  if (!('serial' in navigator)) $('nosupport').style.display = 'block';
+
+  // ---------- log ----------
+  const pad = n => String(n).padStart(2, '0');
+  const stamp = d => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+  function log(kind, text) {
+    const e = { t: new Date(), kind, text };
+    S.log.push(e);
+    if (S.log.length > MAX_LOG) S.log.shift();
+    if (kind === 'tele' && !$('showTele').checked) return;
+    appendEntry(e);
+  }
+  function appendEntry(e) {
+    const el = $('log');
+    const div = document.createElement('div');
+    const arrow = { tx: '>>> ', rx: '<<< ', tele: '<<< ', ok: '<<< ', err: '<<< ', sys: '--- ' }[e.kind];
+    div.innerHTML = `<span class="ts">${stamp(e.t)}</span> <span class="${e.kind}"></span>`;
+    div.lastChild.textContent = arrow + e.text;
+    el.appendChild(div);
+    while (el.childElementCount > MAX_LOG) el.firstChild.remove();
+    if ($('autoscroll').checked) el.scrollTop = el.scrollHeight;
+  }
+  function rerenderLog() {
+    $('log').textContent = '';
+    const show = $('showTele').checked;
+    S.log.forEach(e => { if (show || e.kind !== 'tele') appendEntry(e); });
+  }
+
+  // ---------- serial ----------
+  function setConnected(on) {
+    $('connState').textContent = on ? 'подключено' : 'не подключено';
+    $('connState').className = 'pill' + (on ? ' on' : '');
+    ['btnDisconnect', 'bGet', 'bOn', 'bOff', 'cmd', 'bSend'].forEach(id => $(id).disabled = !on);
+    $('btnConnect').disabled = on;
+    $('baud').disabled = on;
+  }
+
+  async function connect() {
+    try {
+      const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x0483 }] }).catch(async err => {
+        if (err.name === 'NotFoundError') throw err;
+        return navigator.serial.requestPort();
+      });
+      await port.open({ baudRate: +$('baud').value, dataBits: 8, parity: 'none', stopBits: 1 });
+      try { await port.setSignals({ dataTerminalReady: true, requestToSend: false }); } catch (e) {}
+      S.port = port;
+      S.writer = port.writable.getWriter();
+      const info = port.getInfo();
+      log('sys', `Порт открыт (VID ${hex4(info.usbVendorId)}, PID ${hex4(info.usbProductId)}, ${$('baud').value} бод)`);
+      setConnected(true);
+      readLoop();
+    } catch (e) {
+      if (e.name !== 'NotFoundError') log('err', 'Ошибка подключения: ' + e.message);
+    }
+  }
+  const hex4 = v => v == null ? '?' : v.toString(16).toUpperCase().padStart(4, '0');
+
+  async function readLoop() {
+    S.reading = true;
+    const dec = new TextDecoder('windows-1251');
+    while (S.port && S.port.readable && S.reading) {
+      S.reader = S.port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await S.reader.read();
+          if (done) break;
+          feed(dec.decode(value, { stream: true }));
+        }
+      } catch (e) {
+        if (S.reading) log('err', 'Ошибка чтения: ' + e.message);
+      } finally {
+        S.reader.releaseLock();
+        S.reader = null;
+      }
+      if (!S.reading) break;
+    }
+  }
+
+  async function disconnect(silent) {
+    S.reading = false;
+    try { if (S.reader) await S.reader.cancel(); } catch (e) {}
+    try { if (S.writer) { S.writer.releaseLock(); } } catch (e) {}
+    try { if (S.port) await S.port.close(); } catch (e) {}
+    S.port = S.writer = S.reader = null;
+    setConnected(false);
+    if (!silent) log('sys', 'Порт закрыт');
+  }
+
+  if ('serial' in navigator) {
+    navigator.serial.addEventListener('disconnect', e => {
+      if (S.port && e.target === S.port) { log('err', 'Устройство отключено от USB'); disconnect(true); }
+    });
+  }
+
+  async function send(text) {
+    if (!S.writer) return;
+    const eol = $('eol').value.replace(/\\r/g, '\r').replace(/\\n/g, '\n');
+    const data = new TextEncoder().encode(text + eol);
+    await S.writer.write(data);
+    log('tx', text + ($('eol').selectedOptions[0].text === 'нет' ? '' : '  [' + $('eol').selectedOptions[0].text + ']'));
+  }
+
+  // ---------- parsing ----------
+  function feed(chunk) {
+    S.rx += chunk;
+    let i;
+    while ((i = S.rx.indexOf('\n')) >= 0) {
+      const line = S.rx.slice(0, i).replace(/[\r\0]/g, '').trim();
+      S.rx = S.rx.slice(i + 1);
+      if (line) handleLine(line);
+    }
+    // a lone prompt without LF (e.g. after "\r") is flushed when it gets long
+    if (S.rx.length > 4096) { handleLine(S.rx.replace(/[\r\0]/g, '')); S.rx = ''; }
+  }
+
+  function handleLine(line) {
+    if (line.startsWith('<')) { parseTele(line); log('tele', line); return; }
+    if (line === 'OK!') { log('ok', line); if (S.cfgOpen) { S.cfgOpen = false; $('cfgTime').textContent = 'прочитано ' + stamp(new Date()).slice(0, 8); } return; }
+    if (/^ERR0?O?R/i.test(line)) { log('err', line + '  (команда не распознана)'); S.cfgOpen = false; return; }
+    const m = line.match(/^([^=]+)=(.*)$/);
+    if (m) {
+      if (!S.cfgOpen) { S.cfg = {}; S.cfgOpen = true; }
+      S.cfg[m[1].trim()] = m[2].trim();
+      renderCfg();
+    }
+    log('rx', line);
+  }
+
+  const CFG_HINT = {
+    ID: 'Номер устройства', FREQ: 'Частота', ModeSF: 'LoRa SF', Bandwidth: 'Полоса', Coding: 'Код. скорость',
+    Power: 'Мощность', Time: 'Time', Stat: 'Передатчик', 'Preambule len': 'Преамбула',
+    'Time to start': 'До старта', 'Time to landing': 'До посадки', 'Time to undocking': 'До отстыковки', Logic: 'Logic'
+  };
+  function fmtCfg(k, v) {
+    if (k === 'FREQ' && /^\d+$/.test(v)) return (v / 1e6).toFixed(3) + ' МГц';
+    if (k === 'Bandwidth') return v + ' кГц';
+    if (k === 'Power') return v + ' дБм';
+    if (k === 'ModeSF') return 'SF' + (+v);
+    if (k === 'Coding' && /^\d+$/.test(v)) return '4/' + (4 + +v);
+    if (/^Time/.test(k) && /^\d{6}$/.test(v)) return `${v.slice(0, 2)}:${v.slice(2, 4)}:${v.slice(4)}`;
+    return v;
+  }
+  function renderCfg() {
+    const t = $('cfg');
+    t.textContent = '';
+    for (const [k, v] of Object.entries(S.cfg)) {
+      const tr = t.insertRow();
+      tr.insertCell().textContent = CFG_HINT[k] || k;
+      tr.insertCell().textContent = fmtCfg(k, v);
+      tr.title = `${k}=${v}`;
+    }
+    if ('Stat' in S.cfg) {
+      const on = /^ON/i.test(S.cfg.Stat);
+      $('txState').textContent = 'передатчик: ' + (on ? 'ВКЛ' : 'ВЫКЛ');
+      $('txState').className = 'pill ' + (on ? 'on' : 'off');
+    }
+  }
+
+  function parseTele(line) {
+    const tag = (line.match(/^<([^>]*)>/) || [])[1] || '';
+    const kv = {};
+    line.replace(/^<[^>]*>/, '').split(';').forEach(p => { const j = p.indexOf('='); if (j > 0) kv[p.slice(0, j).trim()] = p.slice(j + 1).trim(); });
+    const lat = parseFloat(kv.Lt), lon = parseFloat(kv.Lg), h = parseFloat(kv.h);
+    if (!isFinite(lat) || !isFinite(lon)) return;
+    const tm = (kv.t || '').split('.').map(Number);
+    const sec = tm.length === 3 && tm.every(isFinite) ? tm[0] * 3600 + tm[1] * 60 + tm[2] : null;
+    const pt = { tag, lat, lon, h, t: kv.t || '', sec, recv: Date.now() };
+    const prev = S.track[S.track.length - 1];
+    if (prev && prev.sec != null && sec != null) {
+      let dt = sec - prev.sec; if (dt < 0) dt += 86400;
+      if (dt > 0) {
+        pt.spd = haversine(prev, pt) / dt;
+        pt.crs = bearing(prev, pt);
+        pt.vz = isFinite(h) && isFinite(prev.h) ? (h - prev.h) / dt : NaN;
+      }
+    }
+    S.track.push(pt);
+    if (S.track.length > 5000) S.track.shift();
+    renderTele();
+  }
+  const R = 6371000, rad = d => d * Math.PI / 180;
+  function haversine(a, b) {
+    const dφ = rad(b.lat - a.lat), dλ = rad(b.lon - a.lon);
+    const x = Math.sin(dφ / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dλ / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(x));
+  }
+  function bearing(a, b) {
+    const y = Math.sin(rad(b.lon - a.lon)) * Math.cos(rad(b.lat));
+    const x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(rad(b.lon - a.lon));
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+
+  function renderTele() {
+    const p = S.track[S.track.length - 1];
+    const f = (v, d) => v == null || !isFinite(v) ? '—' : v.toFixed(d);
+    if (p) {
+      $('mLat').textContent = f(p.lat, 6); $('mLon').textContent = f(p.lon, 6);
+      $('mAlt').textContent = f(p.h, 1); $('mTime').textContent = p.t.replace(/\./g, ':') || '—';
+      $('mSpd').textContent = p.spd != null ? `${f(p.spd, 1)} (${f(p.spd * 3.6, 0)} км/ч)` : '—';
+      $('mCrs').textContent = f(p.crs, 0); $('mVz').textContent = f(p.vz, 1);
+    }
+    $('mCnt').textContent = S.track.length;
+    drawTrack(); drawAlt(); updateAge();
+  }
+  function updateAge() {
+    const p = S.track[S.track.length - 1];
+    const el = $('teleAge');
+    if (!p) { el.textContent = ''; return; }
+    const s = Math.round((Date.now() - p.recv) / 1000);
+    el.textContent = `последний пакет ${s} с назад`;
+    el.className = 'muted' + (s > 25 ? ' stale' : '');
+  }
+  setInterval(updateAge, 1000);
+
+  function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  function drawTrack() {
+    const c = $('track'), dpr = window.devicePixelRatio || 1;
+    const w = c.clientWidth, h = c.clientHeight;
+    c.width = w * dpr; c.height = h * dpr;
+    const g = c.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
+    const pts = S.track;
+    g.fillStyle = cssVar('--muted'); g.font = '12px system-ui';
+    if (!pts.length) { g.fillText('Нет данных', 10, 20); return; }
+    const k = Math.cos(rad(pts[pts.length - 1].lat));
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    pts.forEach(p => { const x = p.lon * k; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, p.lat); y1 = Math.max(y1, p.lat); });
+    const span = Math.max(x1 - x0, y1 - y0, 1e-5), m = 14;
+    const sc = Math.min((w - 2 * m) / span, (h - 2 * m) / span);
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const P = p => [w / 2 + (p.lon * k - cx) * sc, h / 2 - (p.lat - cy) * sc];
+    g.strokeStyle = cssVar('--accent'); g.lineWidth = 2; g.lineJoin = 'round'; g.beginPath();
+    pts.forEach((p, i) => { const [x, y] = P(p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+    const dot = (p, col, r) => { const [x, y] = P(p); g.fillStyle = col; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); };
+    dot(pts[0], cssVar('--muted'), 4); dot(pts[pts.length - 1], cssVar('--err'), 5);
+    const meters = haversine({ lat: cy, lon: x0 / k }, { lat: cy, lon: x1 / k });
+    g.fillStyle = cssVar('--muted'); g.fillText(`ширина трека ≈ ${Math.round(meters)} м`, 8, h - 8);
+  }
+  function drawAlt() {
+    const svg = $('alt'), pts = S.track.filter(p => isFinite(p.h)).slice(-300);
+    const w = svg.clientWidth || 300, h = svg.clientHeight || 70;
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    if (pts.length < 2) { svg.innerHTML = ''; return; }
+    const lo = Math.min(...pts.map(p => p.h)), hi = Math.max(...pts.map(p => p.h)), r = Math.max(hi - lo, 1);
+    const xy = pts.map((p, i) => `${(i / (pts.length - 1) * (w - 4) + 2).toFixed(1)},${(h - 14 - (p.h - lo) / r * (h - 20)).toFixed(1)}`).join(' ');
+    svg.innerHTML = `<polyline fill="none" stroke="var(--accent)" stroke-width="2" points="${xy}"/>` +
+      `<text x="2" y="${h - 2}" font-size="11" fill="var(--muted)">мин ${lo.toFixed(0)} м · макс ${hi.toFixed(0)} м</text>`;
+  }
+  window.addEventListener('resize', () => { drawTrack(); drawAlt(); });
+
+  // ---------- files ----------
+  function download(name, text) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  const fileStamp = () => { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`; };
+
+  // ---------- UI ----------
+  $('btnConnect').onclick = connect;
+  $('btnDisconnect').onclick = () => disconnect();
+  $('bGet').onclick = () => send('GET');
+  $('bOn').onclick = async () => { await send('STATON'); setTimeout(() => send('GET'), 700); };
+  $('bOff').onclick = async () => {
+    if (!confirm('Выключить передатчик маяка (STATOFF)?')) return;
+    await send('STATOFF'); setTimeout(() => send('GET'), 700);
+  };
+  $('sendForm').onsubmit = e => {
+    e.preventDefault();
+    const v = $('cmd').value; if (!v && $('eol').value === '') return;
+    if (/^STATOFF$/i.test(v.trim()) && !confirm('Выключить передатчик маяка (STATOFF)?')) return;
+    send(v);
+    if (v && S.history[S.history.length - 1] !== v) { S.history.push(v); S.history = S.history.slice(-50); try { localStorage.setItem('beacon.history', JSON.stringify(S.history)); } catch (e) {} }
+    S.hIdx = -1; $('cmd').value = '';
+  };
+  $('cmd').onkeydown = e => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' || !S.history.length) return;
+    e.preventDefault();
+    if (S.hIdx < 0) S.hIdx = S.history.length;
+    S.hIdx = Math.max(0, Math.min(S.history.length, S.hIdx + (e.key === 'ArrowUp' ? -1 : 1)));
+    $('cmd').value = S.history[S.hIdx] || '';
+  };
+  $('showTele').onchange = rerenderLog;
+  $('bClear').onclick = () => { S.log = []; $('log').textContent = ''; };
+  $('bSaveLog').onclick = () => download(`beacon_log_${fileStamp()}.txt`, S.log.map(e => `${stamp(e.t)} ${e.kind.toUpperCase().padEnd(4)} ${e.text}`).join('\r\n'));
+  $('bCsv').onclick = () => download(`beacon_track_${fileStamp()}.csv`, 'time;lat;lon;alt_m;speed_ms;course_deg;vz_ms\r\n' +
+    S.track.map(p => [p.t, p.lat, p.lon, p.h, p.spd?.toFixed(2) ?? '', p.crs?.toFixed(0) ?? '', p.vz?.toFixed(2) ?? ''].join(';')).join('\r\n'));
+  $('bResetTrack').onclick = () => { S.track = []; renderTele(); };
+  $('btnTheme').onclick = () => {
+    const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.dataset.theme = dark ? 'light' : 'dark';
+    try { localStorage.setItem('beacon.theme', document.documentElement.dataset.theme); } catch (e) {}
+    drawTrack(); drawAlt();
+  };
+
+  setConnected(false);
+  renderTele();
+  log('sys', 'Готово. Нажмите «Подключить» и выберите «STM32 Virtual COM Port».');
+  window.__beaconFeed = feed; // для отладки разбора без устройства
+})();
+</script>
+</body>
+</html>
