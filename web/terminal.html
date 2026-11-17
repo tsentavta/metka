@@ -182,11 +182,8 @@ label { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
 
   async function connect() {
     try {
-      const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x0483 }] }).catch(async err => {
-        if (err.name === 'NotFoundError') throw err;
-        return navigator.serial.requestPort();
-      });
-      await port.open({ baudRate: +$('baud').value, dataBits: 8, parity: 'none', stopBits: 1 });
+      const port = await navigator.serial.requestPort(); // без фильтра, покажет все совместимые
+    await port.open({ baudRate: +$('baud').value, dataBits: 8, parity: 'none', stopBits: 1 });
       try { await port.setSignals({ dataTerminalReady: true, requestToSend: false }); } catch (e) {}
       S.port = port;
       S.writer = port.writable.getWriter();
@@ -195,7 +192,8 @@ label { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
       setConnected(true);
       readLoop();
     } catch (e) {
-      if (e.name !== 'NotFoundError') log('err', 'Ошибка подключения: ' + e.message);
+      if (e.name === 'NotFoundError') log('sys', 'Устройство не выбрано или не найдено');
+      else log('err', 'Ошибка подключения: ' + e.message);
     }
   }
   const hex4 = v => v == null ? '?' : v.toString(16).toUpperCase().padStart(4, '0');
